@@ -80,6 +80,9 @@ if (!(Test-Path "$MountDir\Windows")) {
 }
 
 # Phase 8: Debloating
+
+$AdminGroup = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([System.Security.Principal.NTAccount]).Value
+
 Write-Host "`n[4/11] Debloating system apps..." -ForegroundColor Yellow
 
 Write-Host "  - Dynamically scanning and removing UWP/APPX apps..." -ForegroundColor DarkGray
