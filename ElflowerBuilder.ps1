@@ -14,13 +14,13 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
 }
 
 # Phase 2: Creating workspaces
-$Workspace = "C:\IrisOSBuilder"
+$Workspace = "C:\ElflowerBuilder"
 $MountDir = "$Workspace\Mount"
 $ExtractDir = "$Workspace\Extract"
-$FinalISO = "C:\IrisOS.iso"
+$FinalISO = "C:\Elflower.iso"
 
 Clear-Host
-Write-Host "=== IrisOS Elflower w/ Administrator Builder ===" -ForegroundColor Cyan
+Write-Host "=== PastelPink Elflower w/ Administrator Builder ===" -ForegroundColor Cyan
 Write-Host "=== for Windows 10 ===" -ForegroundColor Cyan
 
 # Phase 3: Cleaning stuffs
@@ -31,6 +31,7 @@ reg unload HKLM\zNTUSER 2>$null | Out-Null
 reg unload HKLM\zSOFTWARE 2>$null | Out-Null
 reg unload HKLM\zSYSTEM 2>$null | Out-Null
 dism.exe /Cleanup-Wim /Quiet | Out-Null
+dism.exe /Cleanup-Mountpoints /Quiet | Out-Null
 
 if (Test-Path $Workspace) { 
     Remove-Item -Path $Workspace -Recurse -Force -ErrorAction SilentlyContinue 
@@ -49,55 +50,55 @@ if (!(Test-Path $IsoPath -PathType Leaf)) {
 }
 
 # Phase 5: Mounting ISO and copying
-Write-Host "`n[1/11] Mounting ISO and copying contents into the workspace..." -ForegroundColor Yellow
+Write-Host "`n[1/13] Mounting ISO and copying contents into the workspace..." -ForegroundColor Yellow
 $IsoImage = Mount-DiskImage -ImagePath $IsoPath -PassThru
 $IsoDrive = ($IsoImage | Get-Volume).DriveLetter + ":"
 
 robocopy "$IsoDrive\" "$ExtractDir" /E /MT:8 /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 
 Dismount-DiskImage -ImagePath $IsoPath | Out-Null
-Set-ItemProperty -Path "$ExtractDir\sources\install.wim" -Name IsReadOnly -Value $false
-Set-ItemProperty -Path "$ExtractDir\sources\boot.wim" -Name IsReadOnly -Value $false
+$InstallSystem = "wim"
+if (Test-Path "$ExtractDir\sources\install.esd") {
+    $InstallSystem = "esd"
+}
+Set-ItemProperty -Path "$ExtractDir\sources\install.$InstallSystem" -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "$ExtractDir\sources\boot.wim" -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
 
 # Phase 6: Choosing index
-Write-Host "`n[2/11] List of available Windows SKUs:" -ForegroundColor Yellow
-dism.exe /Get-WimInfo /WimFile:"$ExtractDir\sources\install.wim"
+Write-Host "`n[2/13] List of available Windows SKUs:" -ForegroundColor Yellow
+dism.exe /Get-WimInfo /WimFile:"$ExtractDir\sources\install.$InstallSystem"
 $WimIndex = Read-Host "-> Enter the index number you want to build (e.g., 6)"
 if ([string]::IsNullOrWhiteSpace($WimIndex)) { $WimIndex = "1" }
 
-# Phase 7: Extracting
-Write-Host "`n[3/11] Extracting Windows system (Mounting WIM Index $WimIndex)..." -ForegroundColor Yellow
+Write-Host "`n[3/13] Extracting Windows system (Mounting WIM Index $WimIndex)..." -ForegroundColor Yellow
+dism.exe /Mount-Image /ImageFile:"$ExtractDir\sources\install.$InstallSystem" /Index:$WimIndex /MountDir:"$MountDir" /Optimize
 
-if (!(Test-Path "$MountDir")) {
-    New-Item -ItemType Directory -Force -Path "$MountDir" | Out-Null
-}
-
-dism.exe /Mount-Image /ImageFile:"$ExtractDir\sources\install.wim" /Index:$WimIndex /MountDir:"$MountDir" /Optimize
-
-if (!(Test-Path "$MountDir\Windows")) {
-    Write-Host "Error: Cannot mount the WIM file. Check your storage space :3" -ForegroundColor Red
-    Exit
-}
-
-# Phase 8: Debloating
-
+# Phase 7: Debloating
 $AdminGroup = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([System.Security.Principal.NTAccount]).Value
 
-Write-Host "`n[4/11] Debloating system apps..." -ForegroundColor Yellow
-
+Write-Host "`n[4/13] Debloating system apps..." -ForegroundColor Yellow
 Write-Host "  - Dynamically scanning and removing UWP/APPX apps..." -ForegroundColor DarkGray
 
 $KeepApps = @(
+    "Microsoft.AV1VideoExtension",
+    "Microsoft.AVCEncoderVideoExtension",
     "Microsoft.DesktopAppInstaller",
-    "Microsoft.SecHealthUI",
-    "Microsoft.VCLibs",
-    "Microsoft.UI.Xaml",
-    "Microsoft.NET.Native",
     "Microsoft.HEIFImageExtension",
+    "Microsoft.HEVCVideoExtension",
+    "Microsoft.MPEG2VideoExtension",
+    "Microsoft.NET.Native",
+    "Microsoft.RawImageExtension",
+    "Microsoft.SecHealthUI",
+    "Microsoft.Services.Store.Engagement",
+    "Microsoft.StorePurchaseApp",
+    "Microsoft.UI.Xaml",
+    "Microsoft.VCLibs",
     "Microsoft.VP9VideoExtensions",
     "Microsoft.WebMediaExtensions",
-    "Microsoft.WebpImageExtension"
+    "Microsoft.WebpImageExtension",
+    "Microsoft.WindowsAppRuntime"
 )
+
 
 $InstalledPackages = Get-AppxProvisionedPackage -Path $MountDir
 
@@ -119,14 +120,12 @@ foreach ($App in $InstalledPackages) {
     }
 }
 
-Write-Host "`n[5/11] Removing Edge and OneDrive..." -ForegroundColor Yellow
+Write-Host "`n[5/13] Removing Edge and OneDrive..." -ForegroundColor Yellow
 
 $EdgePaths = @(
     "$MountDir\Program Files (x86)\Microsoft\Edge",
     "$MountDir\Program Files (x86)\Microsoft\EdgeUpdate",
-    "$MountDir\Program Files (x86)\Microsoft\EdgeCore",
-    "$MountDir\Windows\System32\Microsoft-Edge-Webview",
-    "$MountDir\Program Files (x86)\Microsoft\EdgeWebView"
+    "$MountDir\Program Files (x86)\Microsoft\EdgeCore"
 )
 
 foreach ($Path in $EdgePaths) {
@@ -140,35 +139,38 @@ foreach ($Path in $EdgePaths) {
 
 $OneDrivePaths = @(
     "$MountDir\Windows\System32\OneDriveSetup.exe",
-    "$MountDir\Windows\SysWOW64\OneDriveSetup.exe",
-    "$MountDir\Program Files\Microsoft OneDrive",
-    "$MountDir\Program Files (x86)\Microsoft OneDrive",
-    "$MountDir\Users\Default\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\OneDrive.lnk"
+    "$MountDir\Windows\SysWOW64\OneDriveSetup.exe"
 )
 
 foreach ($Path in $OneDrivePaths) {
     if (Test-Path $Path) {
-        Write-Host "  - Removed $Path" -ForegroundColor DarkGray
-        takeown.exe /F $Path /A 2>$null | Out-Null
-        icacls.exe $Path /grant "$($AdminGroup):(F)" /C /Q 2>$null | Out-Null
-        Remove-Item -Path $Path -Force -ErrorAction SilentlyContinue
+        if ((Get-Item $Path) -is [System.IO.DirectoryInfo]) {
+            takeown.exe /F $Path /R /A /D Y 2>$null | Out-Null
+            icacls.exe $Path /grant "$($AdminGroup):(F)" /T /C /Q 2>$null | Out-Null
+        } else {
+            takeown.exe /F $Path /A 2>$null | Out-Null
+            icacls.exe $Path /grant "$($AdminGroup):(F)" /C /Q 2>$null | Out-Null
+        }
+        
+        Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+
+        if (!(Test-Path $Path)) {
+            Write-Host "  - Removed $Path" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  - Failed to remove $Path" -ForegroundColor Red
+        }
     }
 }
 
- Write-Output "  - Deleting Telemetry files..."
+Write-Host "`n[6/13] Removing Telemetry files..." -ForegroundColor Yellow
+
+Write-Host "  - Deleting Telemetry files..." -ForegroundColor DarkGray
 
 $TelemetryFiles = @(
-    "$MountDir\Windows\System32\wsqmcons.exe",
     "$MountDir\Windows\System32\appraiser.exe",
     "$MountDir\Windows\System32\CompatTelRunner.exe",
     "$MountDir\Windows\System32\DeviceCensus.exe",
-    "$MountDir\Windows\System32\WaasMedicAgent.exe",
-    "$MountDir\Windows\System32\sedlauncher.exe",
-    "$MountDir\Windows\System32\upfc.exe",
-    "$MountDir\Windows\System32\MusNotification.exe",
-    "$MountDir\Windows\System32\MusNotificationUx.exe",
-    "$MountDir\Windows\System32\GameBarPresenceWriter.exe",
-    "$MountDir\Windows\System32\SgrmBroker.exe"
+    "$MountDir\Windows\System32\wsqmcons.exe"
 )
 
 foreach ($File in $TelemetryFiles) {
@@ -195,23 +197,6 @@ foreach ($Folder in $UselessFolders) {
     }
 }
 
-Write-Host "  - Deleting Accessibility Core (Narrator, Magnifier, OSK)..." -ForegroundColor DarkGray
-
-$AccessibilityExes = @(
-    "$MountDir\Windows\System32\Narrator.exe",
-    "$MountDir\Windows\System32\Magnify.exe",
-    "$MountDir\Windows\System32\osk.exe",
-    "$MountDir\Windows\System32\AtBroker.exe"
-)
-
-foreach ($File in $AccessibilityExes) {
-    if (Test-Path $File) {
-        takeown.exe /F $File /A 2>$null | Out-Null
-        icacls.exe $File /grant "$($AdminGroup):(F)" /C /Q 2>$null | Out-Null
-        Remove-Item -Path $File -Force -ErrorAction SilentlyContinue
-    }
-}
-
 $OptionalFeatures = @(
     "FaxServicesClientPackage",
     "Printing-Foundation-InternetPrinting-Client",
@@ -234,23 +219,23 @@ foreach ($Feature in $OptionalFeatures) {
     }
 }
 
-# Phase 9: Removing SystemPackages
-Write-Host "`n[6/11] Removing system packages..." -ForegroundColor Yellow
+# Phase 8: Removing SystemPackages
+Write-Host "`n[7/13] Removing system packages..." -ForegroundColor Yellow
 
 $PackagePatterns = @(
-    "*QuickAssist-*",
     "*InternetExplorer-Optional*",
-    "*MediaPlayer*",
-    "*WordPad-FoD*",
-    "*StepsRecorder*",
-    "*TabletPCMath*",
-    "*PowerShell-ISE-FOD*",
-    "*Wallpaper-Content-Extended*",
-    "*TabletPCMath*",
     "*LanguageFeatures-Handwriting*",
     "*LanguageFeatures-OCR*",
     "*LanguageFeatures-Speech*",
-    "*LanguageFeatures-TextToSpeech*"
+    "*LanguageFeatures-TextToSpeech*",
+    "*MediaPlayer*",
+    "*OneDrive-Setup-Package*",
+    "*PowerShell-ISE-FOD*",
+    "*QuickAssist-*",
+    "*StepsRecorder*",
+    "*TabletPCMath*",
+    "*Wallpaper-Content-Extended*",
+    "*WordPad-FoD*"
 )
 
 Write-Host "  - Scanning system packages..." -ForegroundColor DarkGray
@@ -271,8 +256,8 @@ foreach ($Pattern in $PackagePatterns) {
     }
 }
 
-# Phase 10: Registry"ing"
-Write-Host "`n[7/11] Applying registry..." -ForegroundColor Yellow
+# Phase 9: Registry"ing"
+Write-Host "`n[8/13] Applying registry..." -ForegroundColor Yellow
 try {
     reg load HKLM\zCOMPONENTS "$MountDir\Windows\System32\config\COMPONENTS" | Out-Null
     reg load HKLM\zDEFAULT "$MountDir\Windows\System32\config\default" | Out-Null
@@ -295,6 +280,9 @@ try {
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-338393Enabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-353694Enabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-353696Enabled' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SubscribedContent-338387Enabled' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'RotatingLockScreenEnabled' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'RotatingLockScreenOverlayEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' 'SystemPaneSuggestionsEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableWindowsConsumerFeatures' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableConsumerAccountStateContent' 'REG_DWORD' '1'
@@ -350,6 +338,7 @@ try {
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\InputPersonalization\TrainedDataStore' 'HarvestContacts' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Personalization\Settings' 'AcceptedPrivacyPolicy' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\DataCollection' 'AllowTelemetry' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' 'Enabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\dmwappushservice' 'Start' 'REG_DWORD' '4'
     Write-Output "  - Preventing installation of apps..."
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler_Oobe\OutlookUpdate' 'workCompleted' 'REG_DWORD' '1'
@@ -359,6 +348,10 @@ try {
     Remove-RegistryValue 'HKLM\zSOFTWARE\Microsoft\WindowsUpdate\Orchestrator\UScheduler_Oobe\DevHomeUpdate'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Teams' 'DisableInstallation' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Mail' 'PreventRun' 'REG_DWORD' '1'
+    Write-Output "  - Disabling Folder Auto Discovery..."
+    Set-RegistryValue 'HKLM\zNTUSER\SOFTWARE\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags\AllFolders\Shell' 'FolderType' 'REG_SZ' 'NotSpecified'
+    Write-Output "  - Disabling Search Highlights..."
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings' 'IsDynamicSearchBoxEnabled' 'REG_DWORD' '0'
     Write-Output "  - Disabling Bing..."
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Search' 'ConnectedSearchUseWeb' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Search' 'DisableWebSearch' 'REG_DWORD' '1'
@@ -370,9 +363,21 @@ try {
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' 'TurnOffWindowsCopilot' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Edge' 'HubsSidebarEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Explorer' 'DisableSearchBoxSuggestions' 'REG_DWORD' '1'
+    Write-Output "  - Disabling OneDrive ActiveSetup..."
+    Remove-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Active Setup\Installed Components\{8A69D345-D564-463c-AFF1-A69D9E530F96}'
+    Write-Output "  - Disabling Start Menu Iris recommendation..."
+    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' 'Start_IrisRecommendations' 'REG_DWORD' '0'
+    Write-Output "  - Disabling GameDVR and Xbox Game Bar..."
+    Set-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\GameDVR' 'AppCaptureEnabled' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\GameDVR' 'AllowGameDVR' 'REG_DWORD' '0'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\BcastDVRUserService' 'Start' 'REG_DWORD' '4'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\GameBarPresenceWriter' 'Start' 'REG_DWORD' '4'
+    Write-Output "  - Removing residual OneDrive Startup key..."
+    Remove-RegistryValue 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Run\OneDriveSetup'
     Write-Output "  - Deleting Edge related registries..."
     Remove-RegistryValue "HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge"
     Remove-RegistryValue "HKLM\zSOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge Update"
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\EdgeUpdate' 'DoNotUpdateToEdgeWithChromium' 'REG_DWORD' '1'
     Write-Output "  - Deleting Telemetry Scheduled Tasks..."
     $tasksPath = "$MountDir\Windows\System32\Tasks"
     Remove-Item -Path "$tasksPath\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser" -Force -ErrorAction SilentlyContinue
@@ -391,43 +396,46 @@ finally {
     Start-Sleep -Seconds 3
 }
 
-# Phase 11: ResetBase
-Write-Host "`n[8/11] Deep cleaning image components..." -ForegroundColor Yellow
+# Phase 10: ResetBase
+Write-Host "`n[9/13] Deep cleaning image components..." -ForegroundColor Yellow
 
 Write-Host "  - Applying ResetBase..." -ForegroundColor DarkGray
 dism.exe /Image:$MountDir /Cleanup-Image /StartComponentCleanup /ResetBase | Out-Null
 
-Write-Host "  - Emptying WinSxS Backup folder..." -ForegroundColor DarkGray
+Write-Host "  - Emptying WinSxS Temp..." -ForegroundColor DarkGray
 Remove-Item -Path "$MountDir\Windows\WinSxS\Backup\*" -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$MountDir\Windows\WinSxS\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$MountDir\Windows\WinSxS\InstallTemp\*" -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host "  - Emptying Windows Update Cache..." -ForegroundColor DarkGray
 Remove-Item -Path "$MountDir\Windows\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$MountDir\Windows\SoftwareDistribution\DataStore\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-# Phase 12: Saving & Exporting
-Write-Host "`n[9/11] Saving changes to install.wim..." -ForegroundColor Yellow
+# Phase 11: Saving & Exporting
+Write-Host "`n[10/13] Saving changes to install.$InstallSystem..." -ForegroundColor Yellow
 dism.exe /Unmount-Image /MountDir:"$MountDir" /Commit | Out-Null
 
-Write-Host "`n[!] Choose the compression format:" -ForegroundColor Cyan
-Write-Host " 1. WIM (Faster, recommended)"
-Write-Host " 2. ESD (Slower, but lower image file)"
-$CompressChoice = Read-Host "-> Which one do you wanna choose"
+Write-Host "`n[!] Choose compression:" -ForegroundColor Cyan
+Write-Host "   [1] WIM (Fast but also recommended)" -ForegroundColor Cyan
+Write-Host "   [2] ESD (Slow, smallest size)" -ForegroundColor Cyan
+$Choice = Read-Host "-> Enter 1 or 2 (Default: 1)"
 
-if ($CompressChoice -eq '2') {
-    Write-Host "  - Exporting and heavily compressing to install.esd (This will take a long time :3)..." -ForegroundColor DarkGray
-    dism.exe /Export-Image /SourceImageFile:"$ExtractDir\sources\install.wim" /SourceIndex:$WimIndex /DestinationImageFile:"$ExtractDir\sources\install.esd" /Compress:recovery | Out-Null
-    
-    Write-Host "  - Removing the old WIM file..." -ForegroundColor DarkGray
-    Remove-Item -Path "$ExtractDir\sources\install.wim" -Force
-} else {
-    Write-Host "  - Exporting and optimizing install.wim..." -ForegroundColor DarkGray
-    dism.exe /Export-Image /SourceImageFile:"$ExtractDir\sources\install.wim" /SourceIndex:$WimIndex /DestinationImageFile:"$ExtractDir\sources\install_optimized.wim" /Compress:max | Out-Null
-    
-    Remove-Item -Path "$ExtractDir\sources\install.wim" -Force
-    Rename-Item -Path "$ExtractDir\sources\install_optimized.wim" -NewName "install.wim"
-}
+$DestExt = if ($Choice -eq '2') { "esd" } else { "wim" }
+$CompressType = if ($Choice -eq '2') { "recovery" } else { "max" }
 
-# Phase 13: Autounattend.xml
-Write-Host "`n[10/11] Generating autounattend.xml..." -ForegroundColor Yellow
+$SourceFile = "$ExtractDir\sources\install.$InstallSystem"
+$OptimizedFile = "$ExtractDir\sources\install_optimized.$DestExt"
+
+Write-Host "  - Exporting and optimizing to install.$DestExt..." -ForegroundColor DarkGray
+dism.exe /Export-Image /SourceImageFile:$SourceFile /SourceIndex:$WimIndex /DestinationImageFile:$OptimizedFile /Compress:$CompressType | Out-Null
+
+Remove-Item -Path $SourceFile -Force
+Rename-Item -Path $OptimizedFile -NewName "install.$DestExt"
+
+$InstallSystem = $DestExt
+
+# Phase 12: Autounattend.xml
+Write-Host "`n[11/13] Generating autounattend.xml..." -ForegroundColor Yellow
 
 $XmlContent = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -440,7 +448,7 @@ $XmlContent = @"
             </DynamicUpdate>
             <ImageInstall>
                 <OSImage>
-                    <Compact>true</Compact>
+                    <Compact>false</Compact>
                     <WillShowUI>OnError</WillShowUI>
                     <InstallFrom>
                         <MetaData wcm:action="add">
@@ -500,8 +508,8 @@ Retail
 "@
 $EiCfgContent | Out-File -FilePath "$ExtractDir\sources\ei.cfg" -Encoding ASCII
 
-# Phase 14: Creating ISO files
-Write-Host "`n[11/11] ISO Creation Process..." -ForegroundColor Yellow
+# Phase 13: Creating ISO files
+Write-Host "`n[12/13] ISO Creation Process..." -ForegroundColor Yellow
 
 $OscdimgPath = "$Workspace\oscdimg.exe"
 $MicrosoftUrl = "https://msdl.microsoft.com/download/symbols/oscdimg.exe/3D44737265000/oscdimg.exe"
@@ -523,11 +531,11 @@ if (Test-Path $OscdimgPath) {
     
     Start-Process -FilePath $OscdimgPath -ArgumentList $BuildArgs -Wait -NoNewWindow
     
-    Write-Host "`n[11/11] Completed! Your ISO is ready at: $FinalISO" -ForegroundColor Green
+    Write-Host "`n[13/11] Completed! Your ISO is ready at: $FinalISO" -ForegroundColor Green
     Write-Host "Cleaning up workspace..." -ForegroundColor DarkGray
     Remove-Item -Path $Workspace -Recurse -Force
 } else {
-    Write-Host "`n[!] Cannot compress into ISO, your custom Windows path is: $ExtractDir" -ForegroundColor Yellow
+    Write-Host "`n[!] Cannot compress into ISO, your Windows path is: $ExtractDir" -ForegroundColor Yellow
 }
 
 Write-Host "`nPress Enter to exit..."
